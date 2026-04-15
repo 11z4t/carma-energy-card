@@ -18,6 +18,8 @@ const FLOW_MAX_W = 8000;
 const FLOW_MIN_DURATION_S = 6.0;
 const FLOW_MAX_DURATION_S = 0.75;
 const UPDATE_THROTTLE_MS = 5000;
+const W_TO_KW = 1000;
+const GLASS_BLUR_DEFAULT_PX = 12;
 
 /**
  * Calculate flow animation duration from watts.
@@ -34,13 +36,13 @@ function flowDuration(watts) {
 
 /**
  * Format watts for display.
- * < 1000W: "340 W"
+ * < W_TO_KW: "340 W"
  * >= 1000W: "3.4 kW"
  */
 function fmtWatt(w) {
   const abs = Math.abs(w);
-  if (abs < 1000) return `${Math.round(abs)} W`;
-  return `${(abs / 1000).toFixed(1)} kW`;
+  if (abs < W_TO_KW) return `${Math.round(abs)} W`;
+  return `${(abs / W_TO_KW).toFixed(1)} kW`;
 }
 
 /**
@@ -93,7 +95,7 @@ class CarmaEnergyCard extends HTMLElement {
       show_flow: config.show_flow !== false,
       show_timeline: config.show_timeline !== false,
       show_forecast: config.show_forecast !== false,
-      glass_blur: config.glass_blur ?? 12,
+      glass_blur: config.glass_blur ?? GLASS_BLUR_DEFAULT_PX,
       ...config,
     };
     this._render();
@@ -229,7 +231,7 @@ class CarmaEnergyCard extends HTMLElement {
   // ----------------------------------------------------------
 
   _styles() {
-    const blur = this._config.glass_blur ?? 12;
+    const blur = this._config.glass_blur ?? GLASS_BLUR_DEFAULT_PX;
     return `
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
