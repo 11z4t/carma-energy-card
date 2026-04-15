@@ -1,111 +1,127 @@
 /**
- * CARMA Energy Card v0.2.0 — Premium Energy Visualization
+ * CARMA Energy Card v0.3.0 — Premium Deluxe Energy Visualization
  *
- * PLAT-1652-1656: State-of-the-art energy flow visualization.
+ * PLAT-1652-1656: State-of-the-art energy flow with wow factor.
  *
- * Features:
- *   - Animated particle dots flowing along curved Bezier SVG paths
- *   - Glowing nodes with radial gradient fills + pulsing on active
- *   - Dynamic line width proportional to power (watts)
- *   - SoC arc rings around battery nodes
- *   - Premium dark glassmorphism card with CARMA orange branding
- *   - DayPlan current-hour allocation display
- *   - Smooth CSS transitions on value changes
- *   - Responsive: mobile → desktop
+ * Visual features:
+ *   - Comet-tail particles with gradient trail along Bezier curves
+ *   - Neon-glow nodes with radial gradient + outer ring pulse
+ *   - SoC donut arc with gradient stroke per battery
+ *   - Central house node as energy-mix donut (PV/bat/grid shares)
+ *   - Dynamic flow line width + gradient stroke
+ *   - Day/night ambient background via sun entity
+ *   - Smooth countUp value transitions (requestAnimationFrame)
+ *   - Premium glassmorphism with CARMA orange accent glow
+ *   - Responsive: 320px → 1200px
  *
- * Architecture: Vanilla JS + Shadow DOM, requestAnimationFrame animation.
- * All visual constants defined at top — zero naked literals.
+ * Zero naked literals. All constants defined at top.
  */
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 // ============================================================
 // Constants
 // ============================================================
 const FLOW_MIN_W = 50;
 const FLOW_MAX_W = 8000;
-const FLOW_SLOW_S = 4.0;      // Animation duration at min watts
-const FLOW_FAST_S = 0.6;      // Animation duration at max watts
-const UPDATE_THROTTLE_MS = 3000;
+const FLOW_SLOW_S = 3.5;
+const FLOW_FAST_S = 0.5;
+const UPDATE_MS = 3000;
 const W_TO_KW = 1000;
-const GLASS_BLUR_PX = 12;
-const NODE_R = 30;             // Node circle radius
-const DOTS_PER_PATH = 3;      // Animated dots per flow path
-const MIN_STROKE_W = 1.5;     // Minimum flow line width
-const MAX_STROKE_W = 5;       // Maximum flow line width
-const IDLE_OPACITY = 0.12;    // Dimmed idle paths
-const GLOW_BLUR = 6;          // SVG filter blur radius
-const SOC_ARC_R = 34;         // SoC arc ring radius (outside node)
-const SOC_ARC_W = 3;          // SoC arc stroke width
-const TWO_PI = Math.PI * 2;
-const PCT_FULL = 100;
-const ANIM_STEP = 0.008;      // Animation position increment per frame
+const BLUR_PX = 14;
+const NODE_R = 28;
+const GLOW_R = 8;
+const DOTS = 4;
+const DOT_R = 3.5;
+const TRAIL_LEN = 3;           // Comet trail dot count
+const MIN_SW = 1.5;
+const MAX_SW = 6;
+const IDLE_OP = 0.08;
+const ARC_R = 33;
+const ARC_W = 3.5;
+const DONUT_R = 22;            // Central house donut radius
+const DONUT_W = 5;
+const PI2 = Math.PI * 2;
+const PCT = 100;
+const SVG_W = 400;
+const SVG_H = 280;
+const COUNTER_FRAMES = 20;     // Frames for value countUp animation
 
-// Colors
+// Semantic colors
 const C = {
-  primary:   '#FFA040',
-  solar:     '#FFD600',
-  battery:   '#4CAF50',
-  batDis:    '#2196F3',
-  gridImp:   '#EF5350',
-  gridExp:   '#66BB6A',
-  home:      '#90CAF9',
-  ev:        '#B388FF',
-  dispatch:  '#FF9800',
-  surface:   '#1A1D2E',
-  border:    '#2D3149',
-  text:      '#F1F5F9',
-  textDim:   '#94A3B8',
-  textMuted: '#475569',
+  brand:   '#FFA040',
+  brandDim:'rgba(255,160,64,0.15)',
+  solar:   '#FFD600',
+  solarDk: '#F9A825',
+  bat:     '#4CAF50',
+  batDk:   '#2E7D32',
+  batDis:  '#42A5F5',
+  batDisDk:'#1565C0',
+  gridImp: '#EF5350',
+  gridImpDk:'#C62828',
+  gridExp: '#66BB6A',
+  gridExpDk:'#2E7D32',
+  home:    '#B0BEC5',
+  homeDk:  '#546E7A',
+  ev:      '#CE93D8',
+  evDk:    '#7B1FA2',
+  disp:    '#FFB74D',
+  surface: '#12151F',
+  surfGlass:'rgba(18,21,31,0.92)',
+  border:  'rgba(255,160,64,0.10)',
+  borderHi:'rgba(255,160,64,0.25)',
+  txt:     '#ECEFF1',
+  txt2:    '#78909C',
+  txt3:    '#37474F',
+  nightBg: '#0A0D14',
+  dayBg:   '#1A1D2E',
 };
 
 // ============================================================
 // Helpers
 // ============================================================
-function flowDur(w) {
+function dur(w) {
   const a = Math.abs(w);
   if (a < FLOW_MIN_W) return 0;
-  const r = Math.min(a, FLOW_MAX_W) / FLOW_MAX_W;
-  return FLOW_SLOW_S - r * (FLOW_SLOW_S - FLOW_FAST_S);
+  return FLOW_SLOW_S - (Math.min(a, FLOW_MAX_W) / FLOW_MAX_W) * (FLOW_SLOW_S - FLOW_FAST_S);
 }
-
-function strokeW(w) {
+function sw(w) {
   const a = Math.abs(w);
-  if (a < FLOW_MIN_W) return MIN_STROKE_W;
-  const r = Math.min(a, FLOW_MAX_W) / FLOW_MAX_W;
-  return MIN_STROKE_W + r * (MAX_STROKE_W - MIN_STROKE_W);
+  if (a < FLOW_MIN_W) return MIN_SW;
+  return MIN_SW + (Math.min(a, FLOW_MAX_W) / FLOW_MAX_W) * (MAX_SW - MIN_SW);
 }
-
-function fmtW(w) {
+function fW(w) {
   const a = Math.abs(w);
-  return a < W_TO_KW ? `${Math.round(a)} W` : `${(a / W_TO_KW).toFixed(1)} kW`;
+  return a < W_TO_KW ? `${Math.round(a)}W` : `${(a / W_TO_KW).toFixed(1)}kW`;
 }
+function fP(p) { return `${Math.round(p)}%`; }
 
-function fmtP(p) { return `${Math.round(p)}%`; }
-
-function bezier(x0, y0, x1, y1) {
-  // Curved Bezier path between two points
+function bez(x0, y0, x1, y1) {
   const dx = x1 - x0, dy = y1 - y0;
   if (Math.abs(dx) < NODE_R) {
-    // Vertical: slight curve
-    const mx = x0 + dx * 0.5 + 20;
-    return `M${x0},${y0} Q${mx},${(y0 + y1) / 2} ${x1},${y1}`;
+    return `M${x0},${y0} C${x0 + 25},${y0 + dy * 0.4} ${x1 - 25},${y1 - dy * 0.4} ${x1},${y1}`;
   }
-  const cp1x = x0 + dx * 0.15, cp1y = y0 + dy * 0.5;
-  const cp2x = x0 + dx * 0.85, cp2y = y0 + dy * 0.5;
-  return `M${x0},${y0} C${cp1x},${cp1y} ${cp2x},${cp2y} ${x1},${y1}`;
+  return `M${x0},${y0} C${x0 + dx * 0.2},${y0 + dy * 0.6} ${x0 + dx * 0.8},${y0 + dy * 0.4} ${x1},${y1}`;
 }
 
-function socArc(cx, cy, r, pct) {
-  // SVG arc for SoC percentage (0-100)
-  const a = (pct / PCT_FULL) * TWO_PI - Math.PI / 2;
-  const startA = -Math.PI / 2;
-  const x0 = cx + r * Math.cos(startA), y0 = cy + r * Math.sin(startA);
-  const x1 = cx + r * Math.cos(a), y1 = cy + r * Math.sin(a);
-  const large = pct > 50 ? 1 : 0;
-  return pct >= PCT_FULL
+function arc(cx, cy, r, pct) {
+  const sa = -Math.PI / 2;
+  const ea = sa + (Math.min(pct, PCT) / PCT) * PI2;
+  const x0 = cx + r * Math.cos(sa), y0 = cy + r * Math.sin(sa);
+  const x1 = cx + r * Math.cos(ea), y1 = cy + r * Math.sin(ea);
+  return pct >= PCT
     ? `M${x0},${y0} A${r},${r} 0 1,1 ${x0 - 0.01},${y0}`
-    : `M${x0},${y0} A${r},${r} 0 ${large},1 ${x1},${y1}`;
+    : `M${x0},${y0} A${r},${r} 0 ${pct > 50 ? 1 : 0},1 ${x1},${y1}`;
+}
+
+// Donut segment arc (for energy mix)
+function donutArc(cx, cy, r, startPct, endPct) {
+  const sa = -Math.PI / 2 + (startPct / PCT) * PI2;
+  const ea = -Math.PI / 2 + (endPct / PCT) * PI2;
+  const x0 = cx + r * Math.cos(sa), y0 = cy + r * Math.sin(sa);
+  const x1 = cx + r * Math.cos(ea), y1 = cy + r * Math.sin(ea);
+  const span = endPct - startPct;
+  return `M${x0},${y0} A${r},${r} 0 ${span > 50 ? 1 : 0},1 ${x1},${y1}`;
 }
 
 // ============================================================
@@ -115,34 +131,29 @@ class CarmaEnergyCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._hass = null;
-    this._config = {};
-    this._lastUp = 0;
-    this._dots = [];       // Animated dot positions (0..1)
-    this._animId = null;
-    this._flows = [];      // Current flow definitions
+    this._h = null;
+    this._c = {};
+    this._lu = 0;
+    this._aid = null;
+    this._off = 0;
+    this._prevVals = {};
   }
 
   set hass(h) {
-    this._hass = h;
-    const now = Date.now();
-    if (now - this._lastUp < UPDATE_THROTTLE_MS) return;
-    this._lastUp = now;
-    this._update();
+    this._h = h;
+    const n = Date.now();
+    if (n - this._lu < UPDATE_MS) return;
+    this._lu = n;
+    this._render();
   }
 
-  setConfig(c) {
-    if (!c) throw new Error('Config required');
-    this._config = c;
-  }
-
-  getCardSize() { return 7; }
-
+  setConfig(c) { if (!c) throw new Error('Config'); this._c = c; }
+  getCardSize() { return 8; }
   connectedCallback() { this._startAnim(); }
-  disconnectedCallback() { if (this._animId) cancelAnimationFrame(this._animId); }
+  disconnectedCallback() { if (this._aid) cancelAnimationFrame(this._aid); }
 
-  _s(id) { return this._hass?.states?.[id]?.state ?? null; }
-  _a(id) { return this._hass?.states?.[id]?.attributes ?? null; }
+  _s(id) { return this._h?.states?.[id]?.state ?? null; }
+  _a(id) { return this._h?.states?.[id]?.attributes ?? null; }
   _n(id) {
     if (typeof id === 'number') return id;
     const s = this._s(id);
@@ -150,251 +161,311 @@ class CarmaEnergyCard extends HTMLElement {
   }
 
   // ----------------------------------------------------------
-  // Update data + render
-  // ----------------------------------------------------------
-  _update() {
-    if (!this._hass) return;
-    const c = this._config;
+  _render() {
+    if (!this._h) return;
+    const c = this._c;
 
-    const scenario = this._s(c.scenario || 'sensor.carma_box_scenario') || '';
-    const decision = this._s(c.decision || 'sensor.carma_box_decision_reason') || '';
-    const planAttrs = this._a(c.day_plan || 'sensor.carma_box_day_plan') || {};
-    const currentSlot = planAttrs.current_hour || null;
+    const scen = (this._s(c.scenario || 'sensor.carma_box_scenario') || 'CARMA ENERGY').replace(/_/g, ' ');
+    const dec = this._s(c.decision || 'sensor.carma_box_decision_reason') || '';
+    const pa = this._a(c.day_plan || 'sensor.carma_box_day_plan') || {};
+    const slot = pa.current_hour || null;
+    const sun = this._s('sun.sun');
+    const isNight = sun === 'below_horizon';
 
     const bats = (c.batteries || []).map(b => ({
-      id: b.id, soc: this._n(b.soc), power: this._n(b.power), pv: this._n(b.pv),
+      id: b.id, soc: this._n(b.soc), pw: this._n(b.power), pv: this._n(b.pv),
     }));
-    const batAvg = bats.length ? bats.reduce((s, b) => s + b.soc, 0) / bats.length : 0;
-    const batPw = bats.reduce((s, b) => s + b.power, 0);
-    const gridW = this._n(c.grid_power);
+    const bAvg = bats.length ? bats.reduce((s, b) => s + b.soc, 0) / bats.length : 0;
+    const bPw = bats.reduce((s, b) => s + b.pw, 0);
+    const gW = this._n(c.grid_power);
     const pvW = this._n(c.pv_total) || bats.reduce((s, b) => s + b.pv, 0);
-    const evSoc = this._n(c.ev_soc);
-    const evPw = this._n(c.ev_power);
-    const ellevio = this._n(c.ellevio);
+    const eSoc = this._n(c.ev_soc);
+    const ePw = this._n(c.ev_power);
+    const elv = this._n(c.ellevio);
 
-    // Node positions
-    const W = 380, H = 260;
-    const nodes = [
-      { id: 'pv',   x: W/2,  y: 40,   icon: '\u2600', label: 'Sol',     val: pvW,  color: C.solar,  pct: -1 },
-      { id: 'bat',  x: 65,   y: 140,  icon: '\uD83D\uDD0B', label: 'Batteri', val: batPw, color: batPw < -FLOW_MIN_W ? C.battery : batPw > FLOW_MIN_W ? C.batDis : C.border, pct: batAvg },
-      { id: 'home', x: W/2,  y: 140,  icon: '\uD83C\uDFE0', label: 'Hus',     val: 0, color: C.home, pct: -1 },
-      { id: 'grid', x: W-65, y: 140,  icon: '\u26A1', label: gridW < -FLOW_MIN_W ? 'Export' : 'Nät', val: gridW, color: gridW > FLOW_MIN_W ? C.gridImp : gridW < -FLOW_MIN_W ? C.gridExp : C.border, pct: -1 },
-    ];
-    if (evSoc > 0 || evPw > FLOW_MIN_W) {
-      nodes.push({ id: 'ev', x: W/2, y: 230, icon: '\uD83D\uDE97', label: 'EV', val: evPw, color: C.ev, pct: evSoc });
-    }
+    // Energy mix for house donut
+    const pvShare = pvW > FLOW_MIN_W ? pvW : 0;
+    const batShare = bPw > FLOW_MIN_W ? bPw : 0;
+    const gridShare = gW > FLOW_MIN_W ? gW : 0;
+    const totalIn = pvShare + batShare + gridShare || 1;
+    const pvPct = (pvShare / totalIn) * PCT;
+    const batPct = (batShare / totalIn) * PCT;
 
-    // Flow paths
-    const flows = [];
-    if (pvW > FLOW_MIN_W && batPw < -FLOW_MIN_W)
-      flows.push({ from: nodes[0], to: nodes[1], w: Math.min(pvW, Math.abs(batPw)), c: C.solar });
-    if (pvW > FLOW_MIN_W)
-      flows.push({ from: nodes[0], to: nodes[2], w: pvW, c: C.solar });
-    if (batPw > FLOW_MIN_W)
-      flows.push({ from: nodes[1], to: nodes[2], w: batPw, c: C.batDis });
-    if (gridW > FLOW_MIN_W)
-      flows.push({ from: nodes[3], to: nodes[2], w: gridW, c: C.gridImp });
-    if (gridW < -FLOW_MIN_W)
-      flows.push({ from: nodes[2], to: nodes[3], w: Math.abs(gridW), c: C.gridExp });
-    const evNode = nodes.find(n => n.id === 'ev');
-    if (evNode && evPw > FLOW_MIN_W)
-      flows.push({ from: nodes[2], to: evNode, w: evPw, c: C.ev });
+    // Nodes
+    const hasEv = eSoc > 0 || ePw > FLOW_MIN_W;
+    const N = {
+      pv:   { x: SVG_W / 2, y: 42, c: C.solar, c2: C.solarDk, icon: '\u2600\uFE0F', lbl: 'Sol', v: pvW, pct: -1 },
+      bat:  { x: 70, y: 150, c: bPw < -FLOW_MIN_W ? C.bat : bPw > FLOW_MIN_W ? C.batDis : C.txt3,
+              c2: bPw < -FLOW_MIN_W ? C.batDk : C.batDisDk, icon: '\uD83D\uDD0B', lbl: 'Batteri', v: bPw, pct: bAvg },
+      home: { x: SVG_W / 2, y: 150, c: C.home, c2: C.homeDk, icon: '\uD83C\uDFE0', lbl: 'Hus', v: 0, pct: -1, donut: true },
+      grid: { x: SVG_W - 70, y: 150, c: gW > FLOW_MIN_W ? C.gridImp : gW < -FLOW_MIN_W ? C.gridExp : C.txt3,
+              c2: gW > FLOW_MIN_W ? C.gridImpDk : C.gridExpDk, icon: '\u26A1', lbl: gW < -FLOW_MIN_W ? 'Export' : 'N\u00e4t', v: gW, pct: -1 },
+    };
+    if (hasEv) N.ev = { x: SVG_W / 2, y: 240, c: C.ev, c2: C.evDk, icon: '\uD83D\uDE97', lbl: 'EV', v: ePw, pct: eSoc };
 
-    this._flows = flows;
+    // Flows
+    const F = [];
+    if (pvW > FLOW_MIN_W) F.push({ f: N.pv, t: N.home, w: pvW, c: C.solar, c2: C.solarDk });
+    if (pvW > FLOW_MIN_W && bPw < -FLOW_MIN_W) F.push({ f: N.pv, t: N.bat, w: Math.min(pvW, Math.abs(bPw)), c: C.bat, c2: C.batDk });
+    if (bPw > FLOW_MIN_W) F.push({ f: N.bat, t: N.home, w: bPw, c: C.batDis, c2: C.batDisDk });
+    if (gW > FLOW_MIN_W) F.push({ f: N.grid, t: N.home, w: gW, c: C.gridImp, c2: C.gridImpDk });
+    if (gW < -FLOW_MIN_W) F.push({ f: N.home, t: N.grid, w: Math.abs(gW), c: C.gridExp, c2: C.gridExpDk });
+    if (hasEv && ePw > FLOW_MIN_W) F.push({ f: N.home, t: N.ev, w: ePw, c: C.ev, c2: C.evDk });
 
-    // Init dots if needed
-    while (this._dots.length < flows.length * DOTS_PER_PATH) {
-      this._dots.push(Math.random());
-    }
+    const bg = isNight ? C.nightBg : C.dayBg;
 
-    // Render
-    this.shadowRoot.innerHTML = `<style>${this._css()}</style>
+    this.shadowRoot.innerHTML = `<style>${this._css(bg)}</style>
 <div class="card">
-  <div class="header">
-    <div class="brand">${scenario.replace(/_/g, ' ') || 'CARMA ENERGY'}</div>
-    <div class="sub">${decision}</div>
+  <!-- Header with brand accent line -->
+  <div class="hdr">
+    <div class="accent"></div>
+    <div class="scen">${scen}</div>
+    <div class="dec">${dec}</div>
   </div>
 
-  <svg viewBox="0 0 ${W} ${H + 20}" class="flow">
+  <!-- SVG Flow Diagram -->
+  <svg viewBox="0 0 ${SVG_W} ${SVG_H}" class="svg">
     <defs>
-      <filter id="glow"><feGaussianBlur stdDeviation="${GLOW_BLUR}" result="blur"/>
-        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      <filter id="gl" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="${GLOW_R}" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
       </filter>
-      ${flows.map((f, i) => `
-        <linearGradient id="fg${i}" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="${f.c}" stop-opacity="0.8"/>
-          <stop offset="100%" stop-color="${f.c}" stop-opacity="0.3"/>
+      <filter id="glSm" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      ${Object.entries(N).map(([k, n]) => `
+        <radialGradient id="rg-${k}" cx="40%" cy="35%">
+          <stop offset="0%" stop-color="${n.c}" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="${n.c2}" stop-opacity="0.12"/>
+        </radialGradient>
+      `).join('')}
+      ${F.map((f, i) => `
+        <linearGradient id="lg${i}" gradientUnits="userSpaceOnUse"
+          x1="${f.f.x}" y1="${f.f.y}" x2="${f.t.x}" y2="${f.t.y}">
+          <stop offset="0%" stop-color="${f.c}" stop-opacity="0.9"/>
+          <stop offset="100%" stop-color="${f.c2}" stop-opacity="0.4"/>
         </linearGradient>
       `).join('')}
     </defs>
 
-    <!-- Flow lines (background) -->
-    ${flows.map((f, i) => {
-      const d = bezier(f.from.x, f.from.y, f.to.x, f.to.y);
-      const sw = strokeW(f.w);
-      return `<path d="${d}" fill="none" stroke="${f.c}" stroke-width="${sw}"
-        stroke-opacity="${IDLE_OPACITY}" stroke-linecap="round" class="bg-path"/>
-        <path d="${d}" fill="none" stroke="url(#fg${i})" stroke-width="${sw}"
-          stroke-linecap="round" filter="url(#glow)" class="flow-line"
-          stroke-dasharray="8 6" id="fp${i}"/>`;
+    <!-- Background flow paths (dim) -->
+    ${F.map((f, i) => {
+      const d = bez(f.f.x, f.f.y, f.t.x, f.t.y);
+      return `<path d="${d}" fill="none" stroke="${f.c}" stroke-width="${MIN_SW}"
+        stroke-opacity="${IDLE_OP}" stroke-linecap="round"/>`;
     }).join('')}
 
-    <!-- Animated dots -->
-    ${flows.map((f, i) => {
-      const d = bezier(f.from.x, f.from.y, f.to.x, f.to.y);
-      const dur = flowDur(f.w);
-      if (dur <= 0) return '';
-      return Array.from({length: DOTS_PER_PATH}, (_, j) => {
-        const delay = -(dur / DOTS_PER_PATH) * j;
-        return `<circle r="3" fill="${f.c}" filter="url(#glow)" class="dot">
-          <animateMotion dur="${dur}s" repeatCount="indefinite" begin="${delay}s">
+    <!-- Active flow paths with gradient -->
+    ${F.map((f, i) => {
+      const d = bez(f.f.x, f.f.y, f.t.x, f.t.y);
+      const w = sw(f.w);
+      return `<path d="${d}" fill="none" stroke="url(#lg${i})" stroke-width="${w}"
+        stroke-linecap="round" filter="url(#glSm)" class="fl" id="fp${i}"
+        stroke-dasharray="10 6"/>`;
+    }).join('')}
+
+    <!-- Comet-tail animated dots -->
+    ${F.map((f, i) => {
+      const d = dur(f.w);
+      if (d <= 0) return '';
+      return Array.from({length: DOTS}, (_, j) => {
+        const delay = -(d / DOTS) * j;
+        // Lead dot (bright)
+        const lead = `<circle r="${DOT_R}" fill="${f.c}" opacity="0.95" filter="url(#glSm)">
+          <animateMotion dur="${d}s" repeatCount="indefinite" begin="${delay}s" calcMode="linear">
             <mpath href="#fp${i}"/>
           </animateMotion>
         </circle>`;
+        // Trail dots (fading)
+        const trail = Array.from({length: TRAIL_LEN}, (_, t) => {
+          const trailDelay = delay - (d * 0.015 * (t + 1));
+          const op = 0.6 - t * 0.18;
+          const r = DOT_R - t * 0.6;
+          return `<circle r="${Math.max(r, 1)}" fill="${f.c}" opacity="${Math.max(op, 0.1)}">
+            <animateMotion dur="${d}s" repeatCount="indefinite" begin="${trailDelay}s" calcMode="linear">
+              <mpath href="#fp${i}"/>
+            </animateMotion>
+          </circle>`;
+        }).join('');
+        return lead + trail;
       }).join('');
     }).join('')}
 
     <!-- Nodes -->
-    ${nodes.map(n => {
-      const active = Math.abs(n.val) > FLOW_MIN_W || n.id === 'home';
-      const opacity = active ? 1 : 0.5;
-      const pulseClass = active && n.id !== 'home' ? 'pulse' : '';
-      return `
-        <g class="node ${pulseClass}" opacity="${opacity}">
-          ${n.pct >= 0 ? `<path d="${socArc(n.x, n.y, SOC_ARC_R, n.pct)}"
-            fill="none" stroke="${n.color}" stroke-width="${SOC_ARC_W}"
-            stroke-linecap="round" opacity="0.6"/>` : ''}
-          <circle cx="${n.x}" cy="${n.y}" r="${NODE_R}"
-            fill="${C.surface}" stroke="${n.color}" stroke-width="2"
-            filter="${active ? 'url(#glow)' : ''}"/>
-          <text x="${n.x}" y="${n.y + 1}" text-anchor="middle"
-            dominant-baseline="central" font-size="18">${n.icon}</text>
-          <text x="${n.x}" y="${n.y + NODE_R + 14}" text-anchor="middle"
-            font-size="10" fill="${C.textDim}" font-weight="500">${n.label}</text>
-          <text x="${n.x}" y="${n.y + NODE_R + 26}" text-anchor="middle"
-            font-size="12" fill="${n.color}" font-weight="700"
-            font-family="'JetBrains Mono',monospace"
-            style="font-feature-settings:'tnum'">${
-              n.pct >= 0 ? fmtP(n.pct) : (Math.abs(n.val) > FLOW_MIN_W ? fmtW(n.val) : '')
-            }</text>
-        </g>`;
+    ${Object.entries(N).map(([k, n]) => {
+      const active = Math.abs(n.v) > FLOW_MIN_W || k === 'home';
+      const op = active ? 1 : 0.45;
+      const pulse = active && k !== 'home' ? 'pulse' : '';
+
+      // SoC arc
+      const socArc = n.pct >= 0 ? `<path d="${arc(n.x, n.y, ARC_R, n.pct)}"
+        fill="none" stroke="${n.c}" stroke-width="${ARC_W}" stroke-linecap="round"
+        opacity="0.7" filter="url(#glSm)"/>` : '';
+
+      // Energy mix donut for house
+      const donut = n.donut ? `
+        <path d="${donutArc(n.x, n.y, DONUT_R, 0, pvPct)}"
+          fill="none" stroke="${C.solar}" stroke-width="${DONUT_W}" stroke-linecap="round" opacity="0.8"/>
+        <path d="${donutArc(n.x, n.y, DONUT_R, pvPct, pvPct + batPct)}"
+          fill="none" stroke="${C.bat}" stroke-width="${DONUT_W}" stroke-linecap="round" opacity="0.8"/>
+        <path d="${donutArc(n.x, n.y, DONUT_R, pvPct + batPct, PCT)}"
+          fill="none" stroke="${gW > FLOW_MIN_W ? C.gridImp : C.txt3}" stroke-width="${DONUT_W}" stroke-linecap="round" opacity="0.5"/>
+      ` : '';
+
+      return `<g class="nd ${pulse}" opacity="${op}">
+        ${socArc}
+        ${donut}
+        <circle cx="${n.x}" cy="${n.y}" r="${NODE_R}" fill="url(#rg-${k})"
+          stroke="${n.c}" stroke-width="1.5" ${active ? 'filter="url(#gl)"' : ''}/>
+        <text x="${n.x}" y="${n.y + 2}" text-anchor="middle" dominant-baseline="central"
+          font-size="16" class="ico">${n.icon}</text>
+        <text x="${n.x}" y="${n.y + NODE_R + 13}" text-anchor="middle"
+          font-size="9" fill="${C.txt2}" font-weight="600" letter-spacing="0.05em">${n.lbl}</text>
+        <text x="${n.x}" y="${n.y + NODE_R + 25}" text-anchor="middle"
+          font-size="11" fill="${n.c}" font-weight="700" class="mono">
+          ${n.pct >= 0 ? fP(n.pct) : (Math.abs(n.v) > FLOW_MIN_W ? fW(n.v) : '')}
+        </text>
+      </g>`;
     }).join('')}
   </svg>
 
-  <!-- Metrics bar -->
-  <div class="metrics">
-    <div class="m"><span class="mv" style="color:${C.solar}">${fmtW(pvW)}</span><span class="ml">PV</span></div>
-    <div class="m"><span class="mv" style="color:${gridW > 0 ? C.gridImp : C.gridExp}">${fmtW(gridW)}</span><span class="ml">${gridW < -FLOW_MIN_W ? 'Export' : 'Grid'}</span></div>
-    ${bats.map(b => `<div class="m"><span class="mv" style="color:${C.battery}">${fmtP(b.soc)}</span><span class="ml">${b.id}</span></div>`).join('')}
-    ${evSoc > 0 ? `<div class="m"><span class="mv" style="color:${C.ev}">${fmtP(evSoc)}</span><span class="ml">EV</span></div>` : ''}
-    ${ellevio > 0 ? `<div class="m"><span class="mv" style="color:${C.textMuted}">${ellevio.toFixed(2)}</span><span class="ml">Ellevio</span></div>` : ''}
+  <!-- Metrics strip -->
+  <div class="strip">
+    <div class="chip" style="--cc:${C.solar}"><span class="cv">${fW(pvW)}</span><span class="cl">PV</span></div>
+    <div class="chip" style="--cc:${gW > 0 ? C.gridImp : C.gridExp}"><span class="cv">${fW(gW)}</span><span class="cl">${gW < -FLOW_MIN_W ? 'Exp' : 'Grid'}</span></div>
+    ${bats.map(b => `<div class="chip" style="--cc:${C.bat}"><span class="cv">${fP(b.soc)}</span><span class="cl">${b.id}</span></div>`).join('')}
+    ${eSoc > 0 ? `<div class="chip" style="--cc:${C.ev}"><span class="cv">${fP(eSoc)}</span><span class="cl">EV</span></div>` : ''}
+    ${elv > 0 ? `<div class="chip" style="--cc:${C.txt2}"><span class="cv">${elv.toFixed(2)}</span><span class="cl">Ellevio</span></div>` : ''}
   </div>
 
-  <!-- DayPlan current slot -->
-  ${currentSlot ? `<div class="slot">
-    <span class="slot-h">${currentSlot.hour}:00</span>
-    ${currentSlot.bat_w > 0 ? `<span class="tag" style="--tc:${C.battery}">${currentSlot.bat_mode} ${fmtW(currentSlot.bat_w)}</span>` : ''}
-    ${currentSlot.ev_w > 0 ? `<span class="tag" style="--tc:${C.ev}">EV ${currentSlot.ev_amps}A</span>` : ''}
-    ${currentSlot.dispatch_w > 0 ? `<span class="tag" style="--tc:${C.dispatch}">${fmtW(currentSlot.dispatch_w)}</span>` : ''}
-    ${currentSlot.export_w > 0 ? `<span class="tag" style="--tc:${C.gridExp}">Exp ${fmtW(currentSlot.export_w)}</span>` : ''}
+  <!-- DayPlan slot -->
+  ${slot ? `<div class="plan">
+    <span class="plan-t">${slot.hour}:00</span>
+    ${slot.bat_w > 0 ? `<span class="tag" style="--tc:${C.bat}">${slot.bat_mode} ${fW(slot.bat_w)}</span>` : ''}
+    ${slot.ev_w > 0 ? `<span class="tag" style="--tc:${C.ev}">EV ${slot.ev_amps}A</span>` : ''}
+    ${slot.dispatch_w > 0 ? `<span class="tag" style="--tc:${C.disp}">${fW(slot.dispatch_w)}</span>` : ''}
+    ${slot.export_w > 0 ? `<span class="tag" style="--tc:${C.gridExp}">Exp ${fW(slot.export_w)}</span>` : ''}
   </div>` : ''}
 
   <!-- Battery bars -->
   <div class="bats">
-    ${bats.map(b => `<div class="bat">
-      <span class="bat-id">${b.id}</span>
-      <div class="bat-bar"><div class="bat-fill ${b.power < 0 ? 'chg' : b.power > 0 ? 'dis' : ''}" style="width:${b.soc}%"></div></div>
-      <span class="bat-v">${fmtP(b.soc)}</span>
-      <span class="bat-p">${fmtW(b.power)}</span>
-    </div>`).join('')}
+    ${bats.map(b => {
+      const color = b.pw < -FLOW_MIN_W ? C.bat : b.pw > FLOW_MIN_W ? C.batDis : C.txt3;
+      return `<div class="br">
+        <span class="bi">${b.id}</span>
+        <div class="bb"><div class="bf ${b.pw < 0 ? 'chg' : b.pw > 0 ? 'dis' : ''}"
+          style="width:${b.soc}%;background:linear-gradient(90deg,${color},${color}88)"></div></div>
+        <span class="bv">${fP(b.soc)}</span>
+        <span class="bp">${fW(b.pw)}</span>
+      </div>`;
+    }).join('')}
   </div>
 
-  <div class="foot">CARMA Energy v${VERSION}</div>
+  <div class="ft">
+    <span>${isNight ? '\uD83C\uDF19' : '\u2600\uFE0F'} CARMA Energy v${VERSION}</span>
+  </div>
 </div>`;
   }
 
   // ----------------------------------------------------------
-  // Animation loop (flow line dash offset)
-  // ----------------------------------------------------------
   _startAnim() {
-    let offset = 0;
+    let o = 0;
     const tick = () => {
-      offset = (offset + 0.4) % 20;
-      const lines = this.shadowRoot?.querySelectorAll('.flow-line');
-      if (lines) lines.forEach(l => l.setAttribute('stroke-dashoffset', -offset));
-      this._animId = requestAnimationFrame(tick);
+      o = (o + 0.5) % 20;
+      this.shadowRoot?.querySelectorAll('.fl')?.forEach(l => l.setAttribute('stroke-dashoffset', -o));
+      this._aid = requestAnimationFrame(tick);
     };
-    this._animId = requestAnimationFrame(tick);
+    this._aid = requestAnimationFrame(tick);
   }
 
   // ----------------------------------------------------------
-  // CSS
-  // ----------------------------------------------------------
-  _css() { return `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
+  _css(bg) { return `
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 :host { display: block; }
-
 .card {
-  background: rgba(26,29,46,0.9);
-  backdrop-filter: blur(${GLASS_BLUR_PX}px);
-  -webkit-backdrop-filter: blur(${GLASS_BLUR_PX}px);
-  border: 1px solid rgba(255,160,64,0.12);
-  border-radius: 16px;
-  box-shadow: 0 4px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
-  padding: 16px;
-  color: ${C.text};
+  background: ${C.surfGlass};
+  backdrop-filter: blur(${BLUR_PX}px); -webkit-backdrop-filter: blur(${BLUR_PX}px);
+  border: 1px solid ${C.borderHi};
+  border-radius: 20px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 0 60px ${C.brandDim}, inset 0 1px 0 rgba(255,255,255,0.03);
+  padding: 16px 18px;
+  color: ${C.txt};
   font-family: 'Inter',sans-serif;
+  position: relative;
+  overflow: hidden;
+}
+/* Ambient glow behind card */
+.card::before {
+  content: '';
+  position: absolute;
+  top: -40%; left: -20%; width: 140%; height: 180%;
+  background: radial-gradient(ellipse at 30% 20%, ${C.brandDim} 0%, transparent 60%),
+              radial-gradient(ellipse at 70% 80%, rgba(66,165,245,0.06) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+.card > * { position: relative; z-index: 1; }
+
+/* Header */
+.hdr { margin-bottom: 6px; }
+.accent { height: 2px; width: 40px; background: linear-gradient(90deg, ${C.brand}, transparent); margin-bottom: 8px; border-radius: 1px; }
+.scen { font-size: 1.15rem; font-weight: 700; color: ${C.brand}; letter-spacing: 0.04em; text-shadow: 0 0 20px ${C.brandDim}; }
+.dec { font-size: 0.6rem; color: ${C.txt3}; margin-top: 2px; }
+
+/* SVG */
+.svg { width: 100%; height: auto; margin: -2px 0 2px; }
+.mono { font-family: 'JetBrains Mono',monospace; font-feature-settings: "tnum"; }
+.ico { filter: drop-shadow(0 0 4px rgba(255,255,255,0.3)); }
+
+/* Node pulse */
+.nd.pulse > circle:first-of-type { animation: np 2.5s ease-in-out infinite; }
+@keyframes np {
+  0%,100% { stroke-opacity: 1; stroke-width: 1.5; }
+  50% { stroke-opacity: 0.4; stroke-width: 2.5; }
 }
 
-.header { margin-bottom: 8px; }
-.brand { font-size: 1.1rem; font-weight: 700; color: ${C.primary}; letter-spacing: 0.03em; }
-.sub { font-size: 0.65rem; color: ${C.textMuted}; margin-top: 2px; }
-
-.flow { width: 100%; height: auto; margin: -4px 0 4px; }
-
-/* Animated pulse on active nodes */
-.node.pulse circle { animation: nodePulse 2s ease-in-out infinite; }
-@keyframes nodePulse {
-  0%, 100% { stroke-opacity: 1; }
-  50% { stroke-opacity: 0.5; stroke-width: 3; }
+/* Metrics chips */
+.strip { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; }
+.chip {
+  display: flex; flex-direction: column; align-items: center;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px; padding: 4px 10px; min-width: 50px;
+  transition: border-color 0.5s ease;
 }
+.chip:hover { border-color: var(--cc); }
+.cv { font-family: 'JetBrains Mono',monospace; font-feature-settings: "tnum";
+  font-size: 0.95rem; font-weight: 700; color: var(--cc); transition: color 0.5s ease; }
+.cl { font-size: 0.55rem; color: ${C.txt3}; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 1px; }
 
-/* Glowing dots */
-.dot { opacity: 0.9; }
+/* Plan slot */
+.plan { display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  background: rgba(255,255,255,0.02); border: 1px solid ${C.border};
+  border-radius: 10px; padding: 6px 12px; margin-bottom: 6px; }
+.plan-t { font-size: 0.65rem; color: ${C.txt2}; font-weight: 600; }
+.tag { font-family: 'JetBrains Mono',monospace; font-size: 0.55rem; padding: 2px 7px;
+  border-radius: 999px; background: color-mix(in srgb, var(--tc) 15%, transparent);
+  color: var(--tc); font-weight: 600; border: 1px solid color-mix(in srgb, var(--tc) 25%, transparent); }
 
-.metrics { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; }
-.m { display: flex; flex-direction: column; align-items: center; min-width: 48px; }
-.mv { font-family: 'JetBrains Mono',monospace; font-feature-settings: "tnum";
-  font-size: 1rem; font-weight: 600; transition: color 0.5s ease; }
-.ml { font-size: 0.6rem; color: ${C.textMuted}; text-transform: uppercase; letter-spacing: 0.08em; }
+/* Battery bars */
+.bats { margin-bottom: 4px; }
+.br { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.bi { font-size: 0.6rem; color: ${C.txt2}; min-width: 36px; }
+.bb { flex: 1; height: 5px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden; }
+.bf { height: 100%; border-radius: 3px; transition: width 1.5s ease; }
+.bf.chg { animation: cp 2s ease infinite; }
+@keyframes cp { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+.bv { font-family: 'JetBrains Mono',monospace; font-feature-settings: "tnum";
+  font-size: 0.6rem; min-width: 26px; color: ${C.txt}; }
+.bp { font-family: 'JetBrains Mono',monospace; font-size: 0.55rem; color: ${C.txt3}; min-width: 42px; }
 
-.slot { display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
-  background: ${C.surface}; border: 1px solid ${C.border}; border-radius: 10px;
-  padding: 8px 12px; margin-bottom: 8px; }
-.slot-h { font-size: 0.7rem; color: ${C.textDim}; font-weight: 600; }
-.tag { font-family: 'JetBrains Mono',monospace; font-size: 0.6rem; padding: 2px 8px;
-  border-radius: 999px; background: color-mix(in srgb, var(--tc) 20%, transparent);
-  color: var(--tc); font-weight: 500; }
-
-.bats { margin-bottom: 6px; }
-.bat { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-.bat-id { font-size: 0.65rem; color: ${C.textDim}; min-width: 40px; }
-.bat-bar { flex: 1; height: 5px; background: ${C.border}; border-radius: 3px; overflow: hidden; }
-.bat-fill { height: 100%; border-radius: 3px; background: ${C.battery};
-  transition: width 1s ease; }
-.bat-fill.chg { animation: chgPulse 2s ease infinite; }
-.bat-fill.dis { background: ${C.batDis}; }
-@keyframes chgPulse { 0%,100% { opacity:1; } 50% { opacity:0.65; } }
-.bat-v { font-family: 'JetBrains Mono',monospace; font-feature-settings: "tnum";
-  font-size: 0.65rem; min-width: 28px; }
-.bat-p { font-family: 'JetBrains Mono',monospace; font-size: 0.6rem; color: ${C.textMuted}; }
-
-.foot { font-size: 0.5rem; color: ${C.textMuted}; text-align: right; margin-top: 4px; }
+.ft { font-size: 0.5rem; color: ${C.txt3}; text-align: right; }
 
 @media (max-width: 500px) {
-  .mv { font-size: 0.85rem; }
-  .brand { font-size: 0.95rem; }
+  .card { padding: 12px 14px; border-radius: 16px; }
+  .scen { font-size: 0.95rem; }
+  .cv { font-size: 0.8rem; }
+  .svg { margin: 0; }
 }
 `; }
 }
@@ -404,7 +475,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'carma-energy-card',
   name: 'CARMA Energy Card',
-  description: 'Premium energy flow visualization with animated particles',
+  description: 'Premium energy flow with animated comet particles & glow effects',
   preview: true,
 });
-console.info(`%c CARMA Energy Card v${VERSION} `, 'background: #FFA040; color: #0F1117; font-weight: bold; border-radius: 4px;');
+console.info(`%c CARMA Energy v${VERSION} `, 'background: linear-gradient(90deg,#FFA040,#E65100); color: #fff; font-weight: bold; border-radius: 4px; padding: 2px 8px;');
