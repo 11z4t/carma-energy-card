@@ -17,35 +17,45 @@
  * Zero naked literals. All constants defined at top.
  */
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 
 // ============================================================
-// Constants
+// Constants — every animation/threshold value named (NOLLTOLERANS)
 // ============================================================
 const FLOW_MIN_W = 50;
 const FLOW_MAX_W = 8000;
-const FLOW_SLOW_S = 3.5;
-const FLOW_FAST_S = 0.5;
+const FLOW_SCALE_W = 1000;     // P1: scale factor for speed calc
+const FLOW_MIN_DUR_S = 0.4;    // P1: fastest comet (high watts)
+const FLOW_MAX_DUR_S = 8.0;    // P1: slowest comet (low watts)
 const UPDATE_MS = 3000;
 const W_TO_KW = 1000;
 const BLUR_PX = 14;
 const NODE_R = 28;
+const NODE_PRIMARY_SCALE = 1.2; // P4: PV node 20% larger
 const GLOW_R = 8;
 const DOTS = 4;
 const DOT_R = 3.5;
-const TRAIL_LEN = 3;           // Comet trail dot count
+const TRAIL_LEN = 3;
 const MIN_SW = 1.5;
 const MAX_SW = 6;
 const IDLE_OP = 0.08;
+const IDLE_OPACITY_MIN = 0.3;  // P3: breathing glow min
+const IDLE_OPACITY_MAX = 0.8;  // P3: breathing glow max
+const IDLE_PULSE_S = 3;        // P3: breathing period
 const ARC_R = 33;
 const ARC_W = 3.5;
-const DONUT_R = 22;            // Central house donut radius
+const DONUT_R = 22;
 const DONUT_W = 5;
 const PI2 = Math.PI * 2;
 const PCT = 100;
 const SVG_W = 400;
 const SVG_H = 280;
-const COUNTER_FRAMES = 20;     // Frames for value countUp animation
+const NUMBER_TWEEN_MS = 600;   // P2: countUp animation duration
+const CHARGE_BLINK_MS = 800;   // P4: EV charging blink
+const NODE_PULSE_THRESHOLD_W = 3000; // P4: house pulse when high consumption
+const ALERT_SHADOW_PX = 20;    // P5: peak alert glow radius
+const ALERT_OPACITY = 0.8;     // P5: peak alert glow opacity
+const ALERT_PULSE_S = 1;       // P5: peak alert pulse speed
 
 // Semantic colors
 const C = {
@@ -80,10 +90,13 @@ const C = {
 // ============================================================
 // Helpers
 // ============================================================
+// P1: Flow speed proportional to watts — higher power = faster comets
 function dur(w) {
   const a = Math.abs(w);
   if (a < FLOW_MIN_W) return 0;
-  return FLOW_SLOW_S - (Math.min(a, FLOW_MAX_W) / FLOW_MAX_W) * (FLOW_SLOW_S - FLOW_FAST_S);
+  // Inverse: more watts → shorter duration → faster movement
+  const d = FLOW_MAX_DUR_S / Math.max(a / FLOW_SCALE_W, FLOW_MIN_DUR_S);
+  return Math.max(FLOW_MIN_DUR_S, Math.min(d, FLOW_MAX_DUR_S));
 }
 function sw(w) {
   const a = Math.abs(w);
@@ -95,6 +108,33 @@ function fW(w) {
   return a < W_TO_KW ? `${Math.round(a)}W` : `${(a / W_TO_KW).toFixed(1)}kW`;
 }
 function fP(p) { return `${Math.round(p)}%`; }
+
+// P2: Smooth number counter animation (easeOut tween)
+class ValueTweener {
+  constructor() { this._vals = {}; this._targets = {}; this._starts = {}; this._times = {}; }
+
+  tween(key, target) {
+    if (this._targets[key] === target) return this._vals[key] ?? target;
+    this._starts[key] = this._vals[key] ?? target;
+    this._targets[key] = target;
+    this._times[key] = Date.now();
+    return this._starts[key];
+  }
+
+  tick() {
+    const now = Date.now();
+    for (const k of Object.keys(this._targets)) {
+      const elapsed = now - (this._times[k] || now);
+      const progress = Math.min(elapsed / NUMBER_TWEEN_MS, 1);
+      // easeOutCubic
+      const ease = 1 - Math.pow(1 - progress, 3);
+      const start = this._starts[k] ?? this._targets[k];
+      this._vals[k] = start + (this._targets[k] - start) * ease;
+    }
+  }
+
+  get(key) { return this._vals[key] ?? 0; }
+}
 
 function bez(x0, y0, x1, y1) {
   const dx = x1 - x0, dy = y1 - y0;
@@ -136,7 +176,7 @@ class CarmaEnergyCard extends HTMLElement {
     this._lu = 0;
     this._aid = null;
     this._off = 0;
-    this._prevVals = {};
+    this._tw = new ValueTweener();
   }
 
   set hass(h) {
@@ -214,8 +254,13 @@ class CarmaEnergyCard extends HTMLElement {
 
     const bg = isNight ? C.nightBg : C.dayBg;
 
+    // P5: Check if guard is in breach/alarm state
+    const guardLevel = dec.toLowerCase();
+    const isAlert = guardLevel.includes('breach') || guardLevel.includes('alarm') || guardLevel.includes('critical');
+
     this.shadowRoot.innerHTML = `<style>${this._css(bg)}</style>
-<div class="card">
+<div class="card ${isAlert ? 'alert' : ''}">
+  ${isAlert ? '<div class="alert-text">ELLEVIO PEAK — BEGR\u00c4NSAR</div>' : ''}
   <!-- Header with brand accent line -->
   <div class="hdr">
     <div class="accent"></div>
@@ -297,6 +342,12 @@ class CarmaEnergyCard extends HTMLElement {
       const active = Math.abs(n.v) > FLOW_MIN_W || k === 'home';
       const op = active ? 1 : 0.45;
       const pulse = active && k !== 'home' ? 'pulse' : '';
+      // P3: idle breathing class when inactive
+      const breathe = !active && k !== 'home' ? 'breathe' : '';
+      // P4: EV charging blink
+      const evBlink = k === 'ev' && ePw > FLOW_MIN_W ? 'ev-charge' : '';
+      // P4: house pulse when high consumption
+      const housePulse = k === 'home' && Math.abs(gW) > NODE_PULSE_THRESHOLD_W ? 'house-high' : '';
 
       // SoC arc
       const socArc = n.pct >= 0 ? `<path d="${arc(n.x, n.y, ARC_R, n.pct)}"
@@ -313,10 +364,11 @@ class CarmaEnergyCard extends HTMLElement {
           fill="none" stroke="${gW > FLOW_MIN_W ? C.gridImp : C.txt3}" stroke-width="${DONUT_W}" stroke-linecap="round" opacity="0.5"/>
       ` : '';
 
-      return `<g class="nd ${pulse}" opacity="${op}">
+      const r = k === 'pv' ? Math.round(NODE_R * NODE_PRIMARY_SCALE) : NODE_R;
+      return `<g class="nd ${pulse} ${breathe} ${evBlink} ${housePulse}" opacity="${op}">
         ${socArc}
         ${donut}
-        <circle cx="${n.x}" cy="${n.y}" r="${NODE_R}" fill="url(#rg-${k})"
+        <circle cx="${n.x}" cy="${n.y}" r="${r}" fill="url(#rg-${k})"
           stroke="${n.c}" stroke-width="1.5" ${active ? 'filter="url(#gl)"' : ''}/>
         <text x="${n.x}" y="${n.y + 2}" text-anchor="middle" dominant-baseline="central"
           font-size="16" class="ico">${n.icon}</text>
@@ -332,10 +384,10 @@ class CarmaEnergyCard extends HTMLElement {
 
   <!-- Metrics strip -->
   <div class="strip">
-    <div class="chip" style="--cc:${C.solar}"><span class="cv">${fW(pvW)}</span><span class="cl">PV</span></div>
-    <div class="chip" style="--cc:${gW > 0 ? C.gridImp : C.gridExp}"><span class="cv">${fW(gW)}</span><span class="cl">${gW < -FLOW_MIN_W ? 'Exp' : 'Grid'}</span></div>
-    ${bats.map(b => `<div class="chip" style="--cc:${C.bat}"><span class="cv">${fP(b.soc)}</span><span class="cl">${b.id}</span></div>`).join('')}
-    ${eSoc > 0 ? `<div class="chip" style="--cc:${C.ev}"><span class="cv">${fP(eSoc)}</span><span class="cl">EV</span></div>` : ''}
+    <div class="chip" style="--cc:${C.solar}"><span class="cv" data-tw="pv">${this._tw.tween('pv', pvW), fW(pvW)}</span><span class="cl">PV</span></div>
+    <div class="chip" style="--cc:${gW > 0 ? C.gridImp : C.gridExp}"><span class="cv" data-tw="grid">${this._tw.tween('grid', gW), fW(gW)}</span><span class="cl">${gW < -FLOW_MIN_W ? 'Exp' : 'Grid'}</span></div>
+    ${bats.map((b, i) => `<div class="chip" style="--cc:${C.bat}"><span class="cv" data-tw="bsoc${i}_pct">${this._tw.tween(`bsoc${i}_pct`, b.soc), fP(b.soc)}</span><span class="cl">${b.id}</span></div>`).join('')}
+    ${eSoc > 0 ? `<div class="chip" style="--cc:${C.ev}"><span class="cv" data-tw="evsoc_pct">${this._tw.tween('evsoc_pct', eSoc), fP(eSoc)}</span><span class="cl">EV</span></div>` : ''}
     ${elv > 0 ? `<div class="chip" style="--cc:${C.txt2}"><span class="cv">${elv.toFixed(2)}</span><span class="cl">Ellevio</span></div>` : ''}
   </div>
 
@@ -374,6 +426,16 @@ class CarmaEnergyCard extends HTMLElement {
     const tick = () => {
       o = (o + 0.5) % 20;
       this.shadowRoot?.querySelectorAll('.fl')?.forEach(l => l.setAttribute('stroke-dashoffset', -o));
+
+      // P2: Tick tweener and update displayed values
+      this._tw.tick();
+      this.shadowRoot?.querySelectorAll('[data-tw]')?.forEach(el => {
+        const k = el.getAttribute('data-tw');
+        const v = this._tw.get(k);
+        const isP = k.endsWith('_pct');
+        el.textContent = isP ? fP(v) : fW(v);
+      });
+
       this._aid = requestAnimationFrame(tick);
     };
     this._aid = requestAnimationFrame(tick);
@@ -418,12 +480,47 @@ class CarmaEnergyCard extends HTMLElement {
 .mono { font-family: 'JetBrains Mono',monospace; font-feature-settings: "tnum"; }
 .ico { filter: drop-shadow(0 0 4px rgba(255,255,255,0.3)); }
 
-/* Node pulse */
+/* Node pulse on active */
 .nd.pulse > circle:first-of-type { animation: np 2.5s ease-in-out infinite; }
 @keyframes np {
   0%,100% { stroke-opacity: 1; stroke-width: 1.5; }
   50% { stroke-opacity: 0.4; stroke-width: 2.5; }
 }
+
+/* P3: Idle breathing glow when no flow */
+.nd.breathe .ico { animation: breathe ${IDLE_PULSE_S}s ease-in-out infinite; }
+@keyframes breathe {
+  0%,100% { opacity: ${IDLE_OPACITY_MIN}; }
+  50% { opacity: ${IDLE_OPACITY_MAX}; }
+}
+
+/* P4: EV charging blink */
+.nd.ev-charge > circle:first-of-type { animation: evBlink ${CHARGE_BLINK_MS}ms ease-in-out infinite; }
+@keyframes evBlink {
+  0%,100% { stroke: ${C.ev}; stroke-width: 1.5; }
+  50% { stroke: ${C.brand}; stroke-width: 3; }
+}
+
+/* P4: House high consumption pulse */
+.nd.house-high > circle:first-of-type { animation: housePulse 1.5s ease-in-out infinite; }
+@keyframes housePulse {
+  0%,100% { stroke-opacity: 0.6; }
+  50% { stroke-opacity: 1; stroke-width: 2.5; }
+}
+
+/* P5: Peak alert border */
+.card.alert {
+  border-color: rgba(255,50,50,0.5) !important;
+  box-shadow: 0 0 ${ALERT_SHADOW_PX}px rgba(255,50,50,${ALERT_OPACITY}),
+              0 8px 40px rgba(0,0,0,0.6) !important;
+  animation: alertPulse ${ALERT_PULSE_S}s ease-in-out infinite;
+}
+@keyframes alertPulse {
+  0%,100% { box-shadow: 0 0 ${ALERT_SHADOW_PX}px rgba(255,50,50,${ALERT_OPACITY}), 0 8px 40px rgba(0,0,0,0.6); }
+  50% { box-shadow: 0 0 ${ALERT_SHADOW_PX * 2}px rgba(255,50,50,${ALERT_OPACITY * 0.5}), 0 8px 40px rgba(0,0,0,0.6); }
+}
+.alert-text { color: ${C.gridImp}; font-size: 0.7rem; font-weight: 700; text-align: center;
+  padding: 4px 0; letter-spacing: 0.05em; animation: alertPulse ${ALERT_PULSE_S}s ease-in-out infinite; }
 
 /* Metrics chips */
 .strip { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; }
