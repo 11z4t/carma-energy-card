@@ -1,0 +1,6 @@
+{
+  "name": "CARMA Energy Card",
+  "render_readme": true,
+  "homeassistant": "2024.1.0",
+  "filename": "carma-energy-card.js"
+}

@@ -1,0 +1,89 @@
+/* ============================================================
+   CARMA Energy Card — Design Tokens
+   PLAT-1643: All visual values defined here.
+   Referenced via var(--carma-*) in all components.
+   ============================================================ */
+
+:host {
+  /* ---- Brand ---- */
+  --carma-primary: #FFA040;          /* CARMA orange — headers, buttons, accents */
+  --carma-primary-dim: rgba(255, 160, 64, 0.6);
+  --carma-primary-glow: rgba(255, 160, 64, 0.25);
+
+  /* ---- Surfaces ---- */
+  --carma-bg: #0F1117;               /* Near-black background */
+  --carma-surface: #1A1D2E;          /* Card background */
+  --carma-surface-brand: rgba(255, 160, 64, 0.08); /* Glassmorphism with orange tint */
+  --carma-border: #2D3149;           /* Subtle separator */
+  --carma-border-glow: rgba(255, 160, 64, 0.15);
+
+  /* ---- Energy semantics — NEVER mix with brand orange ---- */
+  --carma-solar: #FFD600;            /* PV production — yellow/gold */
+  --carma-solar-dim: rgba(255, 214, 0, 0.3);
+  --carma-battery: #4CAF50;          /* Battery charging — green */
+  --carma-battery-dim: rgba(76, 175, 80, 0.3);
+  --carma-battery-discharge: #2196F3; /* Battery discharging — blue */
+  --carma-battery-discharge-dim: rgba(33, 150, 243, 0.3);
+  --carma-grid-import: #F44336;      /* Grid import — red (cost) */
+  --carma-grid-import-dim: rgba(244, 67, 54, 0.3);
+  --carma-grid-export: #8BC34A;      /* Grid export — light green (income) */
+  --carma-grid-export-dim: rgba(139, 195, 74, 0.3);
+  --carma-home: #E2E8F0;             /* House/load — near-white */
+  --carma-ev: #A78BFA;               /* EV charging — purple */
+  --carma-ev-dim: rgba(167, 139, 250, 0.3);
+  --carma-dispatch: #F97316;         /* Dispatch devices — orange */
+  --carma-dispatch-dim: rgba(249, 115, 22, 0.3);
+
+  /* ---- Status ---- */
+  --carma-success: #34D399;
+  --carma-warning: #FBBF24;
+  --carma-critical: #F87171;
+
+  /* ---- Text ---- */
+  --carma-text: #F1F5F9;             /* Primary text */
+  --carma-text-secondary: #94A3B8;   /* Secondary/label */
+  --carma-text-muted: #475569;       /* Muted/disabled */
+
+  /* ---- Typography ---- */
+  --carma-font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --carma-font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+
+  /* Font sizes */
+  --carma-text-hero: 2rem;           /* 32px — primary metric */
+  --carma-text-lg: 1.25rem;          /* 20px — secondary value */
+  --carma-text-md: 0.875rem;         /* 14px — unit/label */
+  --carma-text-sm: 0.75rem;          /* 12px — status */
+  --carma-text-xs: 0.6875rem;        /* 11px — timestamp */
+
+  /* ---- Spacing (8px grid) ---- */
+  --carma-space-1: 4px;
+  --carma-space-2: 8px;
+  --carma-space-3: 12px;
+  --carma-space-4: 16px;
+  --carma-space-5: 20px;
+  --carma-space-6: 24px;
+  --carma-space-8: 32px;
+
+  /* ---- Radii ---- */
+  --carma-radius-sm: 8px;
+  --carma-radius-md: 12px;
+  --carma-radius-lg: 16px;
+  --carma-radius-full: 9999px;
+
+  /* ---- Glassmorphism ---- */
+  --carma-glass-bg: rgba(26, 29, 46, 0.85);
+  --carma-glass-blur: 12px;          /* Set to 0 for low-power devices */
+  --carma-glass-border: rgba(255, 255, 255, 0.08);
+  --carma-glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+
+  /* ---- Animation ---- */
+  --carma-transition: 200ms ease;
+  --carma-flow-min-duration: 6s;     /* Slowest flow (low watt) */
+  --carma-flow-max-duration: 0.75s;  /* Fastest flow (high watt) */
+  --carma-flow-idle-opacity: 0.15;   /* Dimmed when idle */
+  --carma-pulse-duration: 2s;
+
+  /* ---- Flow thresholds ---- */
+  --carma-flow-min-w: 50;            /* Below this = no animation */
+  --carma-flow-max-w: 8000;          /* Max watt for fastest animation */
+}
