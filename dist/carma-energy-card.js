@@ -56,6 +56,10 @@ const NODE_PULSE_THRESHOLD_W = 3000; // P4: house pulse when high consumption
 const ALERT_SHADOW_PX = 20;    // P5: peak alert glow radius
 const ALERT_OPACITY = 0.8;     // P5: peak alert glow opacity
 const ALERT_PULSE_S = 1;       // P5: peak alert pulse speed
+const ALERT_RGB = '255,50,50'; // P5: alert red color (RGB)
+const ARC_FULL_CIRCLE_NUDGE_PX = 0.01; // SVG arc full-circle nudge
+const ARC_HALF_PCT = PCT / 2;  // 50% threshold for SVG large-arc-flag
+const TRAIL_OFFSET_FACTOR = 0.015; // Comet trail stagger factor
 
 // Semantic colors
 const C = {
@@ -150,8 +154,8 @@ function arc(cx, cy, r, pct) {
   const x0 = cx + r * Math.cos(sa), y0 = cy + r * Math.sin(sa);
   const x1 = cx + r * Math.cos(ea), y1 = cy + r * Math.sin(ea);
   return pct >= PCT
-    ? `M${x0},${y0} A${r},${r} 0 1,1 ${x0 - 0.01},${y0}`
-    : `M${x0},${y0} A${r},${r} 0 ${pct > 50 ? 1 : 0},1 ${x1},${y1}`;
+    ? `M${x0},${y0} A${r},${r} 0 1,1 ${x0 - ARC_FULL_CIRCLE_NUDGE_PX},${y0}`
+    : `M${x0},${y0} A${r},${r} 0 ${pct > ARC_HALF_PCT ? 1 : 0},1 ${x1},${y1}`;
 }
 
 // Donut segment arc (for energy mix)
@@ -161,7 +165,7 @@ function donutArc(cx, cy, r, startPct, endPct) {
   const x0 = cx + r * Math.cos(sa), y0 = cy + r * Math.sin(sa);
   const x1 = cx + r * Math.cos(ea), y1 = cy + r * Math.sin(ea);
   const span = endPct - startPct;
-  return `M${x0},${y0} A${r},${r} 0 ${span > 50 ? 1 : 0},1 ${x1},${y1}`;
+  return `M${x0},${y0} A${r},${r} 0 ${span > ARC_HALF_PCT ? 1 : 0},1 ${x1},${y1}`;
 }
 
 // ============================================================
@@ -324,7 +328,7 @@ class CarmaEnergyCard extends HTMLElement {
         </circle>`;
         // Trail dots (fading)
         const trail = Array.from({length: TRAIL_LEN}, (_, t) => {
-          const trailDelay = delay - (d * 0.015 * (t + 1));
+          const trailDelay = delay - (d * TRAIL_OFFSET_FACTOR * (t + 1));
           const op = 0.6 - t * 0.18;
           const r = DOT_R - t * 0.6;
           return `<circle r="${Math.max(r, 1)}" fill="${f.c}" opacity="${Math.max(op, 0.1)}">
@@ -510,14 +514,14 @@ class CarmaEnergyCard extends HTMLElement {
 
 /* P5: Peak alert border */
 .card.alert {
-  border-color: rgba(255,50,50,0.5) !important;
-  box-shadow: 0 0 ${ALERT_SHADOW_PX}px rgba(255,50,50,${ALERT_OPACITY}),
+  border-color: rgba(${ALERT_RGB},0.5) !important;
+  box-shadow: 0 0 ${ALERT_SHADOW_PX}px rgba(${ALERT_RGB},${ALERT_OPACITY}),
               0 8px 40px rgba(0,0,0,0.6) !important;
   animation: alertPulse ${ALERT_PULSE_S}s ease-in-out infinite;
 }
 @keyframes alertPulse {
-  0%,100% { box-shadow: 0 0 ${ALERT_SHADOW_PX}px rgba(255,50,50,${ALERT_OPACITY}), 0 8px 40px rgba(0,0,0,0.6); }
-  50% { box-shadow: 0 0 ${ALERT_SHADOW_PX * 2}px rgba(255,50,50,${ALERT_OPACITY * 0.5}), 0 8px 40px rgba(0,0,0,0.6); }
+  0%,100% { box-shadow: 0 0 ${ALERT_SHADOW_PX}px rgba(${ALERT_RGB},${ALERT_OPACITY}), 0 8px 40px rgba(0,0,0,0.6); }
+  50% { box-shadow: 0 0 ${ALERT_SHADOW_PX * 2}px rgba(${ALERT_RGB},${ALERT_OPACITY * 0.5}), 0 8px 40px rgba(0,0,0,0.6); }
 }
 .alert-text { color: ${C.gridImp}; font-size: 0.7rem; font-weight: 700; text-align: center;
   padding: 4px 0; letter-spacing: 0.05em; animation: alertPulse ${ALERT_PULSE_S}s ease-in-out infinite; }
